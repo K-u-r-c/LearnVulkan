@@ -1,0 +1,9 @@
+# VISUAL STUDIO CODE
+.vscode
+
+#BUILD
+build
+bin
+
+#MAC
+.DS_Store
