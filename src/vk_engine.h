@@ -2,17 +2,22 @@
 #define C12F24BE_7752_44A1_B4B1_AA3E1F0F254D
 
 #include "vk_types.h"
+#include "vk_deletionQueue.h"
 
 #include <vector>
 
 class VulkanEngine {
  public:
+  int _selectedShader{0};
+
   bool _isInitialized{false};
   int _frameNumber{0};
 
   VkExtent2D _windowExtent{1600, 800};
 
   struct SDL_Window* _window{nullptr};
+
+  DeletionQueue _mainDeletionQueue;
 
   VkInstance _instance;                       // Vulkan library handle
   VkDebugUtilsMessengerEXT _debug_messenger;  // Vulkan debug output handle
@@ -32,6 +37,11 @@ class VulkanEngine {
 
   VkSemaphore _presentSemaphore, _renderSemaphore;
   VkFence _renderFence;
+
+  VkPipelineLayout _pipelineLayout;
+
+  VkPipeline _trianglePipeline;
+  VkPipeline _redTrianglePipeline;
 
   // Image format expected by the windowing system
   VkFormat _swapchainImageFormat;
@@ -68,6 +78,11 @@ class VulkanEngine {
   void init_commands();
 
   void init_sync_structures();
+
+  bool load_shader_module(const char* filePath,
+                          VkShaderModule* outShaderModule);
+
+  void init_pipelines();
 };
 
 #endif /* C12F24BE_7752_44A1_B4B1_AA3E1F0F254D */
