@@ -49,6 +49,16 @@ VkPipelineColorBlendAttachmentState color_blend_attachment_state();
 
 VkPipelineLayoutCreateInfo pipeline_layout_create_info();
 
+VkImageCreateInfo image_create_info(VkFormat format,
+                                    VkImageUsageFlags usageFlags,
+                                    VkExtent3D extent);
+
+VkImageViewCreateInfo image_view_create_info(VkFormat format, VkImage image,
+                                             VkImageAspectFlags aspectFlags);
+
+VkPipelineDepthStencilStateCreateInfo depth_stencil_create_info(
+    bool bDepthTest, bool bDepthWrite, VkCompareOp compareOp);
+
 }  // namespace vkinit
 
 #endif /* B277EA88_4840_4CAD_AE3C_C90EDFE4016A */

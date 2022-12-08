@@ -31,7 +31,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass) {
   pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
   pipelineInfo.pNext = nullptr;
 
-  pipelineInfo.stageCount = _shaderStages.size();
+  pipelineInfo.stageCount = (uint32_t)_shaderStages.size();
   pipelineInfo.pStages = _shaderStages.data();
   pipelineInfo.pVertexInputState = &_vertexInputInfo;
   pipelineInfo.pInputAssemblyState = &_inputAssembly;
@@ -43,6 +43,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass) {
   pipelineInfo.renderPass = pass;
   pipelineInfo.subpass = 0;
   pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
+  pipelineInfo.pDepthStencilState = &_depthStencil;
 
   VkPipeline newPipeline;
   if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo,

@@ -3,8 +3,17 @@
 
 #include "vk_types.h"
 #include "vk_deletionQueue.h"
+#include "vk_mesh.h"
 
 #include <vector>
+#include <string>
+
+#include <glm/glm.hpp>
+
+struct MeshPushConstants {
+  glm::vec4 data;
+  glm::mat4 render_matrix;
+};
 
 class VulkanEngine {
  public:
@@ -16,6 +25,8 @@ class VulkanEngine {
   VkExtent2D _windowExtent{1600, 800};
 
   struct SDL_Window* _window{nullptr};
+
+  VmaAllocator _allocator;  // Vulkan Memory Allocator
 
   DeletionQueue _mainDeletionQueue;
 
@@ -35,10 +46,15 @@ class VulkanEngine {
 
   VkRenderPass _renderPass;
 
+  VkImageView _depthImageView;
+  AllocatedImage _depthImage;
+  VkFormat _depthFormat;
+
   VkSemaphore _presentSemaphore, _renderSemaphore;
   VkFence _renderFence;
 
   VkPipelineLayout _pipelineLayout;
+  VkPipelineLayout _meshPipelineLayout;
 
   VkPipeline _trianglePipeline;
   VkPipeline _redTrianglePipeline;
@@ -54,6 +70,10 @@ class VulkanEngine {
   // Array of image-views from the swapchain
   std::vector<VkImageView> _swapchainImageViews;
 
+  VkPipeline _meshPipeline;
+  Mesh _triangleMesh;
+  Mesh _monkeyMesh;
+
   // initializes everything in the engine
   void init();
 
@@ -67,6 +87,10 @@ class VulkanEngine {
   void run();
 
  private:
+  std::string path;
+
+  void init_path();
+
   void init_vulkan();
 
   void init_swapchain();
@@ -79,10 +103,14 @@ class VulkanEngine {
 
   void init_sync_structures();
 
-  bool load_shader_module(const char* filePath,
+  bool load_shader_module(const std::string filePath,
                           VkShaderModule* outShaderModule);
 
   void init_pipelines();
+
+  void load_meshes();
+
+  void upload_mesh(Mesh& mesh);
 };
 
 #endif /* C12F24BE_7752_44A1_B4B1_AA3E1F0F254D */
