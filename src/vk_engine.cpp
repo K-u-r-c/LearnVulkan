@@ -14,7 +14,7 @@
 
 #if defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
-#elif defined(_APPLE_)
+#elif defined(__APPLE__)
 #include <mach-o/dyld.h>
 #endif
 
@@ -270,7 +270,7 @@ void VulkanEngine::init_path() {
   GetModuleFileName(NULL, buf, MAX_PATH);
   path = buf;
   path.erase(path.rfind('\\'));
-#elif defined(_APPLE_)
+#elif defined(__APPLE__)
   char buf[PATH_MAX];
   uint32_t bufsize = PATH_MAX;
   if (!_NSGetExecutablePath(buf, &bufsize)) {
