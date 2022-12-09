@@ -1,4 +1,4 @@
-#include "vk_engine.h"
+﻿#include "vk_engine.h"
 #include "vk_pipeline.h"
 #include "vk_types.h"
 #include "vk_initializers.h"
@@ -12,6 +12,12 @@
 #include <SDL2/SDL_vulkan.h>
 #endif
 
+#if defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64)
+#include <windows.h>
+#elif defined(_APPLE_)
+#include <mach-o/dyld.h>
+#endif
+
 #include <VkBootstrap.h>
 
 #include <glm/gtx/transform.hpp>
@@ -22,7 +28,6 @@
 #include <iostream>
 #include <fstream>
 #include <limits.h>
-#include <mach-o/dyld.h>
 
 // Defined to imediately abort when there is an arror.
 #define VK_CHECK(x)                                               \
@@ -260,18 +265,19 @@ void VulkanEngine::run() {
 }
 
 void VulkanEngine::init_path() {
+#if defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN64)
+  char buf[MAX_PATH];
+  GetModuleFileName(NULL, buf, MAX_PATH);
+  path = buf;
+  path.erase(path.rfind('\\'));
+#elif defined(_APPLE_)
   char buf[PATH_MAX];
   uint32_t bufsize = PATH_MAX;
   if (!_NSGetExecutablePath(buf, &bufsize)) {
     path = buf;
-    path.erase(path.rfind(
-#ifdef _WIN32
-        '\\'
-#else
-        '/'
-#endif
-        ));
+    path.erase(path.rfind('/'));
   }
+#endif
 }
 
 void VulkanEngine::init_vulkan() {

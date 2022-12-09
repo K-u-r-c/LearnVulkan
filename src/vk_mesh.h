@@ -3,6 +3,7 @@
 
 #include "vk_types.h"
 #include <vector>
+#include <string>
 #include <glm/vec3.hpp>
 
 struct VertexInputDescription {
