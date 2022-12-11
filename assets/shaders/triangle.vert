@@ -1,22 +1,17 @@
 #version 450
 
-layout (location = 0) out vec3 outColor;
+layout(location = 0) in vec3 vPosition;
+layout(location = 1) in vec3 vNormal;
+layout(location = 2) in vec3 vColor;
+
+layout(location = 0) out vec3 outColor;
+
+layout(push_constant) uniform constants {
+  vec4 data;
+  mat4 render_matrix;
+} PushConstnts;
 
 void main() {
-    // const array of positions for the triangle
-    const vec3 positions[3] = vec3[3](
-        vec3(1.0, 1.0, 0.0),
-        vec3(-1.0, 1.0, 0.0),
-        vec3(0.0, -1.0, 0.0)
-    );
-
-    // const array of colors for the triangle
-    const vec3 colors[3] = vec3[3](
-        vec3(1.0, 0.0, 0.0),
-        vec3(0.0, 1.0, 0.0),
-        vec3(0.0, 0.0, 1.0)
-    );
-
-    gl_Position = vec4(positions[gl_VertexIndex], 1.0);
-    outColor = colors[gl_VertexIndex];
+  gl_Position = PushConstnts.render_matrix *  vec4(vPosition, 1.0);
+  outColor = vColor;
 }

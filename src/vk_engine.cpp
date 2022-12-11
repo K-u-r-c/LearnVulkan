@@ -39,6 +39,89 @@
     }                                                             \
   } while (0);
 
+Material* VulkanEngine::create_material(VkPipeline pipeline,
+                                        VkPipelineLayout layout,
+                                        const std::string& name) {
+  Material mat;
+  mat.pipeline = pipeline;
+  mat.pipelineLayout = layout;
+  _materials[name] = mat;
+  return &_materials[name];
+}
+
+Material* VulkanEngine::get_material(const std::string& name) {
+  auto it = _materials.find(name);
+  if (it == _materials.end()) {
+    return nullptr;
+  } else {
+    return &(*it).second;
+  }
+}
+
+Mesh* VulkanEngine::get_mesh(const std::string& name) {
+  auto it = _meshes.find(name);
+  if (it == _meshes.end()) {
+    return nullptr;
+  } else {
+    return &(*it).second;
+  }
+}
+
+void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first,
+                                int count) {
+  // make a model view matrix for rendering the object camera view
+  glm::mat4 view = glm::translate(glm::mat4(1.f), _cameraXYZPos);
+
+  view = glm::rotate(view, glm::radians((float)_mouseRelY * _mouseSensitivity),
+                     glm::vec3(1.f, 0.f, 0.f));
+  view = glm::rotate(view, glm::radians((float)_mouseRelX * _mouseSensitivity),
+                     glm::vec3(0.f, 1.f, 0.f));
+
+  // camera projection
+  glm::mat4 projection =
+      glm::perspective(glm::radians(70.f),
+                       static_cast<float>(_windowExtent.width) /
+                           static_cast<float>(_windowExtent.height),
+                       0.1f, 200.0f);
+  projection[1][1] *= -1;
+
+  Mesh* lastMesh = nullptr;
+  Material* lastMaterial = nullptr;
+  for (int i = 0; i < count; i++) {
+    RenderObject& object = first[i];
+
+    // only bind the pipeline if it doesn't match with the already bound one
+    if (object.material != lastMaterial) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        object.material->pipeline);
+      lastMaterial = object.material;
+    }
+
+    glm::mat4 model = object.transformMatrix;
+    // final render matrix, that we are calculating on the cpu
+    glm::mat4 mesh_matrix = projection * view * model;
+
+    MeshPushConstants constants;
+    constants.render_matrix = mesh_matrix;
+
+    // upload the mesh to the GPU via push constants
+    vkCmdPushConstants(cmd, object.material->pipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants),
+                       &constants);
+
+    // only bind the mesh if it's a different one from last bind
+    if (object.mesh != lastMesh) {
+      // bind the mesh vertex buffer with offset 0
+      VkDeviceSize offset = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &object.mesh->_vertexBuffer._buffer,
+                             &offset);
+      lastMesh = object.mesh;
+    }
+    // we can now draw
+    vkCmdDraw(cmd, object.mesh->_vertices.size(), 1, 0, 0);
+  }
+}
+
 void VulkanEngine::init() {
   // We initialize SDL and create a window with it.
   SDL_Init(SDL_INIT_VIDEO);
@@ -73,6 +156,8 @@ void VulkanEngine::init() {
   init_pipelines();
 
   load_meshes();
+
+  init_scene();
 
   // everything went fine
   _isInitialized = true;
@@ -155,31 +240,7 @@ void VulkanEngine::draw() {
 
   vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _meshPipeline);
-
-  glm::vec3 camPos = {0.0f, 0.0f, -2.0f};
-
-  glm::mat4 view = glm::translate(glm::mat4(1.0f), camPos);
-  glm::mat4 projection = glm::perspective(
-      glm::radians(70.0f),
-      (float)_windowExtent.width / (float)_windowExtent.height, 0.1f, 200.0f);
-  projection[1][1] *= -1;
-  glm::mat4 model = glm::rotate(
-      glm::mat4(1.0f), glm::radians(_frameNumber * 0.4f), glm::vec3(0, 1, 0));
-
-  glm::mat4 mesh_matrix = projection * view * model;
-
-  MeshPushConstants constants;
-  constants.render_matrix = mesh_matrix;
-
-  vkCmdPushConstants(cmd, _meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                     sizeof(MeshPushConstants), &constants);
-
-  VkDeviceSize offset = 0;
-  vkCmdBindVertexBuffers(cmd, 0, 1, &_monkeyMesh._vertexBuffer._buffer,
-                         &offset);
-
-  vkCmdDraw(cmd, _monkeyMesh._vertices.size(), 1, 0, 0);
+  draw_objects(cmd, _renderables.data(), _renderables.size());
 
   // End the renderpass
   vkCmdEndRenderPass(cmd);
@@ -231,32 +292,33 @@ void VulkanEngine::run() {
   SDL_Event e;
   bool bQuit = false;
 
-  // main loop
+  bool mouseRelative = false;
+  SDL_SetRelativeMouseMode(SDL_FALSE);
+
   while (!bQuit) {
-    // Handle events on queue
+    // SDL event handling
     while (SDL_PollEvent(&e) != 0) {
-      // close the window when user alt-f4s or clicks the X button
       if (e.type == SDL_QUIT) bQuit = true;
 
-      // Handle keyboard events
-      switch (e.type) {
-        case SDL_KEYDOWN:
-          if (e.key.keysym.sym == SDLK_SPACE) {
-            _selectedShader++;
-            if (_selectedShader > 1) _selectedShader = 0;
-          }
+      if (e.type == SDL_KEYDOWN) {
+        if (e.key.keysym.sym == SDLK_ESCAPE) mouseRelative = false;
+        SDL_SetRelativeMouseMode(mouseRelative ? SDL_TRUE : SDL_FALSE);
+      }
 
-          std::cout << "Key pressed | Event key: "
-                    << SDL_GetKeyName(e.key.keysym.sym) << std::endl;
-          break;
+      if (e.type == SDL_MOUSEBUTTONDOWN) {
+        if (e.button.button == SDL_BUTTON_LEFT) {
+          mouseRelative = true;
+          SDL_SetRelativeMouseMode(mouseRelative ? SDL_TRUE : SDL_FALSE);
+        }
+      }
 
-        case SDL_KEYUP:
-          std::cout << "Key released | Event key: "
-                    << SDL_GetKeyName(e.key.keysym.sym) << std::endl;
-          break;
+      if (e.type == SDL_MOUSEWHEEL)
+        _cameraXYZPos.z <= 0.0f ? _cameraXYZPos.z += e.wheel.y* 0.1f
+                                : _cameraXYZPos.z = 0.0f;
 
-        default:
-          break;
+      if (e.type == SDL_MOUSEMOTION && mouseRelative) {
+        _mouseRelX += e.motion.xrel;
+        _mouseRelY += e.motion.yrel;
       }
     }
 
@@ -649,13 +711,10 @@ bool VulkanEngine::load_shader_module(const std::string filename,
 
 void VulkanEngine::init_pipelines() {
   // Load the shader modules
-  VkShaderModule triangleVertexShader;
-  VkShaderModule triangleFragmentShader;
-  VkShaderModule red_triangleVertexShader;
-  VkShaderModule red_triangleFragmentShader;
+  VkShaderModule vertexShader;
+  VkShaderModule fragmentShader;
 
-  if (!load_shader_module(path + "/shaders/triangle.vert.spv",
-                          &triangleVertexShader)) {
+  if (!load_shader_module(path + "/shaders/triangle.vert.spv", &vertexShader)) {
     std::cerr << "Failed to load vertex shader" << std::endl;
     return;
   } else {
@@ -663,134 +722,20 @@ void VulkanEngine::init_pipelines() {
   }
 
   if (!load_shader_module(path + "/shaders/triangle.frag.spv",
-                          &triangleFragmentShader)) {
+                          &fragmentShader)) {
     std::cerr << "Failed to load fragment shader" << std::endl;
     return;
   } else {
     std::cout << "Fragment shader loaded" << std::endl;
   }
 
-  if (!load_shader_module(path + "/shaders/triangle_red.vert.spv",
-                          &red_triangleVertexShader)) {
-    std::cerr << "Failed to load vertex shader" << std::endl;
-    return;
-  } else {
-    std::cout << "Vertex shader loaded red" << std::endl;
-  }
-
-  if (!load_shader_module(path + "/shaders/triangle_red.frag.spv",
-                          &red_triangleFragmentShader)) {
-    std::cerr << "Failed to load fragment shader" << std::endl;
-    return;
-  } else {
-    std::cout << "Fragment shader loaded" << std::endl;
-  }
-
-  // Build the pipeline layout that controls the iputs/outputs of the shader
-  VkPipelineLayoutCreateInfo pipeline_layout_info =
-      vkinit::pipeline_layout_create_info();
-
-  VK_CHECK(                                                            //
-      vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr,  //
-                             &_pipelineLayout)                         //
-  );
-
-  // Build the stage-create info for both vertex and fragment shaders
   PipelineBuilder pipelineBuilder;
-
   pipelineBuilder._shaderStages.push_back(
       vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT,
-                                                triangleVertexShader));
-
+                                                vertexShader));
   pipelineBuilder._shaderStages.push_back(
       vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT,
-                                                triangleFragmentShader));
-
-  // Vertex input controls how to read the vertex data from the vertex buffer
-  pipelineBuilder._vertexInputInfo = vkinit::vertex_input_state_create_info();
-
-  // Input assembly controls how to assemble the vertex data
-  pipelineBuilder._inputAssembly =
-      vkinit::input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-
-  // Build biewport and scissor from the swapchain extents
-  pipelineBuilder._viewport.x = 0.0f;
-  pipelineBuilder._viewport.y = 0.0f;
-  pipelineBuilder._viewport.width = (float)_windowExtent.width;
-  pipelineBuilder._viewport.height = (float)_windowExtent.height;
-  pipelineBuilder._viewport.minDepth = 0.0f;
-  pipelineBuilder._viewport.maxDepth = 1.0f;
-
-  pipelineBuilder._scissor.offset = {0, 0};
-  pipelineBuilder._scissor.extent = _windowExtent;
-
-  // Rasterizer takes the geometry that is shaped by the vertices from the
-  // vertex shader and turns it into fragments to be colored by the fragment
-  // shader; it also performs depth testing, face culling and the scissor test
-  pipelineBuilder._rasterizer =
-      vkinit::rasterization_state_create_info(VK_POLYGON_MODE_FILL);
-
-  // Multisampling is used to perform anti-aliasing
-  pipelineBuilder._multisampling = vkinit::multisampling_state_create_info();
-
-  // Color blending attachments. Single blend with no blending and writing to
-  // RGBA
-  pipelineBuilder._colorBlendAttachment =
-      vkinit::color_blend_attachment_state();
-
-  // Use triangle layout we created
-  pipelineBuilder._pipelineLayout = _pipelineLayout;
-
-  pipelineBuilder._depthStencil = vkinit::depth_stencil_create_info(
-      true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
-
-  // Build the pipeline
-  _trianglePipeline = pipelineBuilder.build_pipeline(_device, _renderPass);
-
-  pipelineBuilder._shaderStages.clear();
-
-  pipelineBuilder._shaderStages.push_back(
-      vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT,
-                                                red_triangleVertexShader));
-
-  pipelineBuilder._shaderStages.push_back(
-      vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT,
-                                                red_triangleFragmentShader));
-
-  // Build the pipeline for red triangle
-  _redTrianglePipeline = pipelineBuilder.build_pipeline(_device, _renderPass);
-
-  // Build the mesh pipeline
-  VertexInputDescription vertexDescription = Vertex::get_vertex_description();
-
-  pipelineBuilder._vertexInputInfo.pVertexAttributeDescriptions =
-      vertexDescription.attributes.data();
-  pipelineBuilder._vertexInputInfo.vertexAttributeDescriptionCount =
-      vertexDescription.attributes.size();
-
-  pipelineBuilder._vertexInputInfo.pVertexBindingDescriptions =
-      vertexDescription.bindings.data();
-  pipelineBuilder._vertexInputInfo.vertexBindingDescriptionCount =
-      vertexDescription.bindings.size();
-
-  pipelineBuilder._shaderStages.clear();
-
-  VkShaderModule meshVertShader;
-  if (!load_shader_module(path + "/shaders/tri_mesh.vert.spv",
-                          &meshVertShader)) {
-    std::cout << "Error when building the triangle vertex shader module"
-              << std::endl;
-  } else {
-    std::cout << "Red Triangle vertex shader successfully loaded" << std::endl;
-  }
-
-  pipelineBuilder._shaderStages.push_back(
-      vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT,
-                                                meshVertShader));
-
-  pipelineBuilder._shaderStages.push_back(
-      vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT,
-                                                triangleFragmentShader));
+                                                fragmentShader));
 
   VkPipelineLayoutCreateInfo mesh_pipeline_layout_info =
       vkinit::pipeline_layout_create_info();
@@ -803,26 +748,60 @@ void VulkanEngine::init_pipelines() {
   mesh_pipeline_layout_info.pPushConstantRanges = &push_constant;
   mesh_pipeline_layout_info.pushConstantRangeCount = 1;
 
+  VkPipelineLayout mesh_pipeline_layout;
+
   VK_CHECK(vkCreatePipelineLayout(_device, &mesh_pipeline_layout_info, nullptr,
-                                  &_meshPipelineLayout));
+                                  &mesh_pipeline_layout));
 
-  pipelineBuilder._pipelineLayout = _meshPipelineLayout;
+  pipelineBuilder._pipelineLayout = mesh_pipeline_layout;
+  pipelineBuilder._vertexInputInfo = vkinit::vertex_input_state_create_info();
+  pipelineBuilder._inputAssembly =
+      vkinit::input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 
-  _meshPipeline = pipelineBuilder.build_pipeline(_device, _renderPass);
+  pipelineBuilder._viewport.x = 0.0f;
+  pipelineBuilder._viewport.y = 0.0f;
+  pipelineBuilder._viewport.width = (float)_windowExtent.width;
+  pipelineBuilder._viewport.height = (float)_windowExtent.height;
+  pipelineBuilder._viewport.minDepth = 0.0f;
+  pipelineBuilder._viewport.maxDepth = 1.0f;
 
-  vkDestroyShaderModule(_device, meshVertShader, nullptr);
-  vkDestroyShaderModule(_device, triangleVertexShader, nullptr);
-  vkDestroyShaderModule(_device, triangleFragmentShader, nullptr);
-  vkDestroyShaderModule(_device, red_triangleVertexShader, nullptr);
-  vkDestroyShaderModule(_device, red_triangleFragmentShader, nullptr);
+  pipelineBuilder._scissor.offset = {0, 0};
+  pipelineBuilder._scissor.extent = _windowExtent;
+
+  pipelineBuilder._rasterizer =
+      vkinit::rasterization_state_create_info(VK_POLYGON_MODE_FILL);
+
+  pipelineBuilder._multisampling = vkinit::multisampling_state_create_info();
+
+  pipelineBuilder._colorBlendAttachment =
+      vkinit::color_blend_attachment_state();
+
+  pipelineBuilder._depthStencil = vkinit::depth_stencil_create_info(
+      true, true, VK_COMPARE_OP_LESS_OR_EQUAL);
+
+  VertexInputDescription vertexDescription = Vertex::get_vertex_description();
+
+  pipelineBuilder._vertexInputInfo.pVertexAttributeDescriptions =
+      vertexDescription.attributes.data();
+  pipelineBuilder._vertexInputInfo.vertexAttributeDescriptionCount =
+      static_cast<uint32_t>(vertexDescription.attributes.size());
+
+  pipelineBuilder._vertexInputInfo.pVertexBindingDescriptions =
+      vertexDescription.bindings.data();
+  pipelineBuilder._vertexInputInfo.vertexBindingDescriptionCount =
+      static_cast<uint32_t>(vertexDescription.bindings.size());
+
+  VkPipeline meshPipeline =
+      pipelineBuilder.build_pipeline(_device, _renderPass);
+
+  create_material(meshPipeline, mesh_pipeline_layout, "defaultmesh");
+
+  vkDestroyShaderModule(_device, vertexShader, nullptr);
+  vkDestroyShaderModule(_device, fragmentShader, nullptr);
 
   _mainDeletionQueue.push_function([=]() {
-    vkDestroyPipeline(_device, _trianglePipeline, nullptr);
-    vkDestroyPipeline(_device, _redTrianglePipeline, nullptr);
-    vkDestroyPipeline(_device, _meshPipeline, nullptr);
-
-    vkDestroyPipelineLayout(_device, _pipelineLayout, nullptr);
-    vkDestroyPipelineLayout(_device, _meshPipelineLayout, nullptr);
+    vkDestroyPipeline(_device, meshPipeline, nullptr);
+    vkDestroyPipelineLayout(_device, mesh_pipeline_layout, nullptr);
   });
 }
 
@@ -864,18 +843,63 @@ void VulkanEngine::upload_mesh(Mesh& mesh) {
 }
 
 void VulkanEngine::load_meshes() {
-  _triangleMesh._vertices.resize(3);
+  Mesh triangleMesh;
 
-  _triangleMesh._vertices[0].position = {0.75f, 0.75f, 0.0f};
-  _triangleMesh._vertices[1].position = {-0.75f, 0.75f, 0.0f};
-  _triangleMesh._vertices[2].position = {0.0f, -0.75f, 0.0f};
+  triangleMesh._vertices.resize(3);
 
-  _triangleMesh._vertices[0].color = {0.0f, 1.0f, 0.0f};
-  _triangleMesh._vertices[1].color = {0.0f, 1.0f, 0.0f};
-  _triangleMesh._vertices[2].color = {0.0f, 1.0f, 0.0f};
+  triangleMesh._vertices[0].position = {0.75f, 0.75f, 0.0f};
+  triangleMesh._vertices[1].position = {-0.75f, 0.75f, 0.0f};
+  triangleMesh._vertices[2].position = {0.0f, -0.75f, 0.0f};
 
-  _monkeyMesh.load_from_obj(path + "/models/monkey_smooth/monkey_smooth.obj");
+  triangleMesh._vertices[0].color = {0.0f, 1.0f, 0.0f};
+  triangleMesh._vertices[1].color = {0.0f, 1.0f, 0.0f};
+  triangleMesh._vertices[2].color = {0.0f, 1.0f, 0.0f};
 
-  upload_mesh(_triangleMesh);
-  upload_mesh(_monkeyMesh);
+  Mesh monkeyMesh;
+  monkeyMesh.load_from_obj(path + "/models/monkey_smooth/monkey_smooth.obj");
+
+  Mesh myShapeMesh;
+  myShapeMesh.load_from_obj(path + "/models/my_shape/my_shape.obj");
+
+  upload_mesh(triangleMesh);
+  upload_mesh(monkeyMesh);
+  upload_mesh(myShapeMesh);
+
+  _meshes["monkey"] = monkeyMesh;
+  _meshes["triangle"] = triangleMesh;
+  _meshes["myshape"] = myShapeMesh;
+}
+
+void VulkanEngine::init_scene() {
+  RenderObject monkey;
+  monkey.mesh = get_mesh("monkey");
+  monkey.material = get_material("defaultmesh");
+  monkey.transformMatrix = glm::mat4{1.0f};
+
+  _renderables.push_back(monkey);
+
+  for (int x = -20; x <= 20; x++) {
+    for (int y = -20; y <= 20; y++) {
+      RenderObject tri;
+      tri.mesh = get_mesh("triangle");
+      tri.material = get_material("defaultmesh");
+      glm::mat4 translation =
+          glm::translate(glm::mat4{1.0}, glm::vec3(x, 0, y));
+      glm::mat4 scale = glm::scale(glm::mat4{1.0}, glm::vec3(0.2, 0.2, 0.2));
+      tri.transformMatrix = translation * scale;
+
+      _renderables.push_back(tri);
+    }
+  }
+
+  RenderObject myShape;
+  myShape.mesh = get_mesh("myshape");
+  myShape.material = get_material("defaultmesh");
+
+  glm::mat4 translation = glm::translate(glm::mat4{1.0}, glm::vec3(0, 5, 0));
+  glm::mat4 scale = glm::scale(glm::mat4{1.0}, glm::vec3(0.2, 0.2, 0.2));
+
+  myShape.transformMatrix = translation * scale;
+
+  _renderables.push_back(myShape);
 }
