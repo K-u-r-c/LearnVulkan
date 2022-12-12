@@ -729,14 +729,6 @@ void VulkanEngine::init_pipelines() {
     std::cout << "Fragment shader loaded" << std::endl;
   }
 
-  PipelineBuilder pipelineBuilder;
-  pipelineBuilder._shaderStages.push_back(
-      vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT,
-                                                vertexShader));
-  pipelineBuilder._shaderStages.push_back(
-      vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT,
-                                                fragmentShader));
-
   VkPipelineLayoutCreateInfo mesh_pipeline_layout_info =
       vkinit::pipeline_layout_create_info();
 
@@ -752,6 +744,14 @@ void VulkanEngine::init_pipelines() {
 
   VK_CHECK(vkCreatePipelineLayout(_device, &mesh_pipeline_layout_info, nullptr,
                                   &mesh_pipeline_layout));
+
+  PipelineBuilder pipelineBuilder;
+  pipelineBuilder._shaderStages.push_back(
+      vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT,
+                                                vertexShader));
+  pipelineBuilder._shaderStages.push_back(
+      vkinit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT,
+                                                fragmentShader));
 
   pipelineBuilder._pipelineLayout = mesh_pipeline_layout;
   pipelineBuilder._vertexInputInfo = vkinit::vertex_input_state_create_info();
