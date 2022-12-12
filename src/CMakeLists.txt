@@ -10,3 +10,9 @@ target_link_libraries(vulkan_guide vkbootstrap vma glm tinyobjloader imgui stb_i
 target_link_libraries(vulkan_guide Vulkan::Vulkan sdl2)
 
 add_dependencies(vulkan_guide Shaders)
+
+if(MSVC)
+	set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+endif()
+
+target_link_options(vulkan_guide PRIVATE ${SUBSYSTEM_LINKER_OPTIONS})
