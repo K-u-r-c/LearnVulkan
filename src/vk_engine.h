@@ -11,6 +11,8 @@
 
 #include <glm/glm.hpp>
 
+constexpr unsigned FRAME_OVERLAP = 2;
+
 struct MeshPushConstants {
   glm::vec4 data;
   glm::mat4 render_matrix;
@@ -25,6 +27,14 @@ struct RenderObject {
   Mesh* mesh;
   Material* material;
   glm::mat4 transformMatrix;
+};
+
+struct FrameData {
+  VkSemaphore _presentSemaphore, _renderSemaphore;
+  VkFence _renderFence;
+
+  VkCommandPool _commandPool;
+  VkCommandBuffer _mainCommandBuffer;
 };
 
 class VulkanEngine {
@@ -46,14 +56,10 @@ class VulkanEngine {
   VkPhysicalDevice _chosenGPU;                // Vulkan physical device
   VkDevice _device;                           // Vulkan device for commands
 
-  VkSemaphore _presentSemaphore, _renderSemaphore;
-  VkFence _renderFence;
-
   VkQueue _graphicsQueue;         // Queue we will submit to
   uint32_t _graphicsQueueFamily;  // Family of that queue
 
-  VkCommandPool _commandPool;          // The command pool for commands
-  VkCommandBuffer _mainCommandBuffer;  // The buffer we will rocerd into
+  FrameData _frames[FRAME_OVERLAP];
 
   VkRenderPass _renderPass;
 
@@ -98,6 +104,8 @@ class VulkanEngine {
   Mesh* get_mesh(const std::string& name);
 
   void draw_objects(VkCommandBuffer cmd, RenderObject* first, int count);
+
+  FrameData& get_current_frame();
 
  private:
   std::string path;

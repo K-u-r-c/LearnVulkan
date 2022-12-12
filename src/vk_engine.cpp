@@ -188,46 +188,37 @@ void VulkanEngine::draw() {
   }
 
   // Wait untill the GPU has finished rendering the last frame. Timeout of 1 sec
-  VK_CHECK(vkWaitForFences(_device, 1, &_renderFence, VK_TRUE, 1000000000));
-  VK_CHECK(vkResetFences(_device, 1, &_renderFence));
+  VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence,
+                           VK_TRUE, 1000000000));
+  VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence));
 
-  // Now that we are sure that the commands are finished executing, we can
-  // safely reset the command buffer to begin recording again
-  VK_CHECK(vkResetCommandBuffer(_mainCommandBuffer, 0));
+  VK_CHECK(vkResetCommandBuffer(get_current_frame()._mainCommandBuffer, 0));
 
   // Get the index of the next available swapchain image:
   uint32_t swapchainImageIndex;
-  VK_CHECK(                                        //
-      vkAcquireNextImageKHR(_device,               //
-                            _swapchain,            //
-                            1000000000,            //
-                            _presentSemaphore,     //
-                            nullptr,               //
-                            &swapchainImageIndex)  //
+  VK_CHECK(                                                         //
+      vkAcquireNextImageKHR(_device,                                //
+                            _swapchain,                             //
+                            1000000000,                             //
+                            get_current_frame()._presentSemaphore,  //
+                            nullptr,                                //
+                            &swapchainImageIndex)                   //
   );
 
-  VkCommandBuffer cmd = _mainCommandBuffer;
+  VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
 
-  // Begin the command buffer recording. We will use this command buffer exactly
-  // once so we let Vulkan know about it.
   VkCommandBufferBeginInfo cmdBeginInfo = vkinit::command_buffer_begin_info(
       VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
   VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-  // Make a clear-color from frame number. This will flash with a 120*pi frame
-  // period
   VkClearValue clearValue;
-  float flash = abs(sin(_frameNumber / 120.0f));
-  clearValue.color = {{0.0f, 0.0f, flash, 1.0f}};
+  clearValue.color = {{0.01f, 0.01f, 0.01f, 1.0f}};
 
   // Clear depth at 1
   VkClearValue depthClear;
   depthClear.depthStencil.depth = 1.0f;
 
-  // Start the main renderpass.
-  // We will use the clear color from above and the framebuffer of the index the
-  // swapchain gave us
   VkRenderPassBeginInfo rpInfo = vkinit::render_pass_begin_info(
       _renderPass, _windowExtent, _framebuffers[swapchainImageIndex]);
 
@@ -247,11 +238,6 @@ void VulkanEngine::draw() {
   // End the command buffer recording
   VK_CHECK(vkEndCommandBuffer(cmd));
 
-  // prepare the submission to the queue.
-  // we want to wait on the _presentSemaphore, as that semaphore is signaled
-  // when the swapchain is ready we will signal the _renderSemaphore, to signal
-  // that rendering has finished
-
   VkSubmitInfo submit = vkinit::submit_info(&cmd);
   VkPipelineStageFlags waitStage =
       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -259,32 +245,26 @@ void VulkanEngine::draw() {
   submit.pWaitDstStageMask = &waitStage;
 
   submit.waitSemaphoreCount = 1;
-  submit.pWaitSemaphores = &_presentSemaphore;
+  submit.pWaitSemaphores = &get_current_frame()._presentSemaphore;
 
   submit.signalSemaphoreCount = 1;
-  submit.pSignalSemaphores = &_renderSemaphore;
+  submit.pSignalSemaphores = &get_current_frame()._renderSemaphore;
 
-  // submit command buffer to the queue and execute it.
-  //  _renderFence will now block until the graphic commands finish execution
-  VK_CHECK(vkQueueSubmit(_graphicsQueue, 1, &submit, _renderFence));
+  VK_CHECK(vkQueueSubmit(_graphicsQueue, 1, &submit,
+                         get_current_frame()._renderFence));
 
-  // this will put the image we just rendered into the visible window.
-  // we want to wait on the _renderSemaphore for that,
-  // as it's necessary that drawing commands have finished before the image is
-  // displayed to the user
   VkPresentInfoKHR presentInfo = vkinit::present_info();
 
   presentInfo.pSwapchains = &_swapchain;
   presentInfo.swapchainCount = 1;
 
-  presentInfo.pWaitSemaphores = &_renderSemaphore;
+  presentInfo.pWaitSemaphores = &get_current_frame()._renderSemaphore;
   presentInfo.waitSemaphoreCount = 1;
 
   presentInfo.pImageIndices = &swapchainImageIndex;
 
   VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
 
-  // Increase the number of frames drawn
   _frameNumber++;
 }
 
@@ -467,26 +447,31 @@ void VulkanEngine::init_swapchain() {
 }
 
 void VulkanEngine::init_commands() {
-  // Create a command pool for commands submitted to the graphics queue
-  // we also want the pool to allow for resetting of individual command buffers
   VkCommandPoolCreateInfo commandPoolInfo = vkinit::command_pool_create_info(
       _graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
 
-  VK_CHECK(                                                                   //
-      vkCreateCommandPool(_device, &commandPoolInfo, nullptr, &_commandPool)  //
-  );
+  for (int i = 0; i < FRAME_OVERLAP; i++) {
+    VK_CHECK(                                          //
+        vkCreateCommandPool(_device,                   //
+                            &commandPoolInfo,          //
+                            nullptr,                   //
+                            &_frames[i]._commandPool)  //
+    );
 
-  // Allocate the default command buffer that we will use for rendering
-  VkCommandBufferAllocateInfo cmdAllocInfo =
-      vkinit::command_buffer_allocate_info(_commandPool, 1);
+    // Allocate the default command buffer that we will use for rendering
+    VkCommandBufferAllocateInfo cmdAllocInfo =
+        vkinit::command_buffer_allocate_info(_frames[i]._commandPool, 1);
 
-  VK_CHECK(                                                                  //
-      vkAllocateCommandBuffers(_device, &cmdAllocInfo, &_mainCommandBuffer)  //
-  );
+    VK_CHECK(                                                     //
+        vkAllocateCommandBuffers(_device,                         //
+                                 &cmdAllocInfo,                   //
+                                 &_frames[i]._mainCommandBuffer)  //
+    );
 
-  _mainDeletionQueue.push_function([=]() {                 //
-    vkDestroyCommandPool(_device, _commandPool, nullptr);  //
-  });
+    _mainDeletionQueue.push_function([=]() {                            //
+      vkDestroyCommandPool(_device, _frames[i]._commandPool, nullptr);  //
+    });
+  }
 }
 
 void VulkanEngine::init_default_renderpass() {
@@ -628,39 +613,41 @@ void VulkanEngine::init_framebuffers() {
 }
 
 void VulkanEngine::init_sync_structures() {
-  // Create synchronization structures
-
   VkFenceCreateInfo fenceCreateInfo =
       vkinit::fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
 
-  VK_CHECK(                                                             //
-      vkCreateFence(_device, &fenceCreateInfo, nullptr, &_renderFence)  //
-  );
-
-  _mainDeletionQueue.push_function([=]() {           //
-    vkDestroyFence(_device, _renderFence, nullptr);  //
-  });
-
-  // For the semaphore, we dont need any special flags
   VkSemaphoreCreateInfo semaphoreCreateInfo = vkinit::semaphore_create_info();
 
-  VK_CHECK(                                    //
-      vkCreateSemaphore(_device,               //
-                        &semaphoreCreateInfo,  //
-                        nullptr,               //
-                        &_presentSemaphore)    //
-  );
-  VK_CHECK(                                    //
-      vkCreateSemaphore(_device,               //
-                        &semaphoreCreateInfo,  //
-                        nullptr,               //
-                        &_renderSemaphore)     //
-  );
+  for (int i = 0; i < FRAME_OVERLAP; i++) {
+    VK_CHECK(                                    //
+        vkCreateFence(_device,                   //
+                      &fenceCreateInfo,          //
+                      nullptr,                   //
+                      &_frames[i]._renderFence)  //
+    );
 
-  _mainDeletionQueue.push_function([=]() {                    //
-    vkDestroySemaphore(_device, _presentSemaphore, nullptr);  //
-    vkDestroySemaphore(_device, _renderSemaphore, nullptr);   //
-  });
+    _mainDeletionQueue.push_function([=]() {                      //
+      vkDestroyFence(_device, _frames[i]._renderFence, nullptr);  //
+    });
+
+    VK_CHECK(                                             //
+        vkCreateSemaphore(_device,                        //
+                          &semaphoreCreateInfo,           //
+                          nullptr,                        //
+                          &_frames[i]._presentSemaphore)  //
+    );
+    VK_CHECK(                                            //
+        vkCreateSemaphore(_device,                       //
+                          &semaphoreCreateInfo,          //
+                          nullptr,                       //
+                          &_frames[i]._renderSemaphore)  //
+    );
+
+    _mainDeletionQueue.push_function([=]() {                               //
+      vkDestroySemaphore(_device, _frames[i]._presentSemaphore, nullptr);  //
+      vkDestroySemaphore(_device, _frames[i]._renderSemaphore, nullptr);   //
+    });
+  }
 }
 
 bool VulkanEngine::load_shader_module(const std::string filename,
@@ -872,7 +859,7 @@ void VulkanEngine::load_meshes() {
 
 void VulkanEngine::init_scene() {
   RenderObject monkey;
-  monkey.mesh = get_mesh("monkey");
+  monkey.mesh = get_mesh("triangle");
   monkey.material = get_material("defaultmesh");
   monkey.transformMatrix = glm::mat4{1.0f};
 
@@ -881,7 +868,7 @@ void VulkanEngine::init_scene() {
   for (int x = -20; x <= 20; x++) {
     for (int y = -20; y <= 20; y++) {
       RenderObject tri;
-      tri.mesh = get_mesh("triangle");
+      tri.mesh = get_mesh("monkey");
       tri.material = get_material("defaultmesh");
       glm::mat4 translation =
           glm::translate(glm::mat4{1.0}, glm::vec3(x, 0, y));
@@ -902,4 +889,8 @@ void VulkanEngine::init_scene() {
   myShape.transformMatrix = translation * scale;
 
   _renderables.push_back(myShape);
+}
+
+FrameData& VulkanEngine::get_current_frame() {
+  return _frames[_frameNumber % FRAME_OVERLAP];
 }
