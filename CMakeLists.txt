@@ -14,8 +14,13 @@ add_subdirectory(third_party)
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/bin")
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/bin")
 
-file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/bin/shaders")
-file(COPY ${CMAKE_CURRENT_LIST_DIR}/assets/models DESTINATION "${PROJECT_SOURCE_DIR}/bin")
+if(XCODE)
+  file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/bin/vulkan_guide.app/Contents/Resources/shaders")
+  file(COPY ${CMAKE_CURRENT_LIST_DIR}/assets/models DESTINATION "${PROJECT_SOURCE_DIR}/bin/vulkan_guide.app/Contents/Resources/")
+else()
+  file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/bin/shaders")
+  file(COPY ${CMAKE_CURRENT_LIST_DIR}/assets/models DESTINATION "${PROJECT_SOURCE_DIR}/bin")
+endif()
 
 add_subdirectory(src)
 
@@ -32,7 +37,13 @@ file(GLOB_RECURSE GLSL_SOURCE_FILES
 foreach(GLSL ${GLSL_SOURCE_FILES})
   message(STATUS "BUILDING SHADER")
   get_filename_component(FILE_NAME ${GLSL} NAME)
-  set(SPIRV "${PROJECT_SOURCE_DIR}/bin/shaders/${FILE_NAME}.spv")
+
+  if(XCODE)
+    set(SPIRV "${PROJECT_SOURCE_DIR}/bin/vulkan_guide.app/Contents/Resources/shaders/${FILE_NAME}.spv")
+  else()
+    set(SPIRV "${PROJECT_SOURCE_DIR}/bin/shaders/${FILE_NAME}.spv")
+  endif()
+  
   message(STATUS ${GLSL})
   ##execute glslang command to compile that specific shader
   add_custom_command(

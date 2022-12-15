@@ -39,6 +39,16 @@
     }                                                             \
   } while (0);
 
+CameraPositioner_FirstPerson positioner(glm::vec3(0.0f),
+                                        glm::vec3(0.f, 0.f, -1.f),
+                                        glm::vec3(0.f, 1.f, 0.f));
+Camera camera(positioner);
+
+struct MouseState {
+  glm::vec2 pos = glm::vec2(0.0f);
+  bool pressedLeft = false;
+} mouseState;
+
 Material* VulkanEngine::create_material(VkPipeline pipeline,
                                         VkPipelineLayout layout,
                                         const std::string& name) {
@@ -64,61 +74,6 @@ Mesh* VulkanEngine::get_mesh(const std::string& name) {
     return nullptr;
   } else {
     return &(*it).second;
-  }
-}
-
-void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first,
-                                int count) {
-  // make a model view matrix for rendering the object camera view
-  glm::mat4 view = glm::translate(glm::mat4(1.f), _cameraXYZPos);
-
-  view = glm::rotate(view, glm::radians((float)_mouseRelY * _mouseSensitivity),
-                     glm::vec3(1.f, 0.f, 0.f));
-  view = glm::rotate(view, glm::radians((float)_mouseRelX * _mouseSensitivity),
-                     glm::vec3(0.f, 1.f, 0.f));
-
-  // camera projection
-  glm::mat4 projection =
-      glm::perspective(glm::radians(70.f),
-                       static_cast<float>(_windowExtent.width) /
-                           static_cast<float>(_windowExtent.height),
-                       0.1f, 200.0f);
-  projection[1][1] *= -1;
-
-  Mesh* lastMesh = nullptr;
-  Material* lastMaterial = nullptr;
-  for (int i = 0; i < count; i++) {
-    RenderObject& object = first[i];
-
-    // only bind the pipeline if it doesn't match with the already bound one
-    if (object.material != lastMaterial) {
-      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                        object.material->pipeline);
-      lastMaterial = object.material;
-    }
-
-    glm::mat4 model = object.transformMatrix;
-    // final render matrix, that we are calculating on the cpu
-    glm::mat4 mesh_matrix = projection * view * model;
-
-    MeshPushConstants constants;
-    constants.render_matrix = mesh_matrix;
-
-    // upload the mesh to the GPU via push constants
-    vkCmdPushConstants(cmd, object.material->pipelineLayout,
-                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants),
-                       &constants);
-
-    // only bind the mesh if it's a different one from last bind
-    if (object.mesh != lastMesh) {
-      // bind the mesh vertex buffer with offset 0
-      VkDeviceSize offset = 0;
-      vkCmdBindVertexBuffers(cmd, 0, 1, &object.mesh->_vertexBuffer._buffer,
-                             &offset);
-      lastMesh = object.mesh;
-    }
-    // we can now draw
-    vkCmdDraw(cmd, object.mesh->_vertices.size(), 1, 0, 0);
   }
 }
 
@@ -152,6 +107,8 @@ void VulkanEngine::init() {
   init_framebuffers();
 
   init_sync_structures();
+
+  init_descriptors();
 
   init_pipelines();
 
@@ -269,41 +226,105 @@ void VulkanEngine::draw() {
 }
 
 void VulkanEngine::run() {
-  SDL_Event e;
-  bool bQuit = false;
-
-  bool mouseRelative = false;
-  SDL_SetRelativeMouseMode(SDL_FALSE);
-
   while (!bQuit) {
-    // SDL event handling
-    while (SDL_PollEvent(&e) != 0) {
-      if (e.type == SDL_QUIT) bQuit = true;
+    handle_input();
+    update();
+    draw();
+  }
+}
 
-      if (e.type == SDL_KEYDOWN) {
-        if (e.key.keysym.sym == SDLK_ESCAPE) mouseRelative = false;
-        SDL_SetRelativeMouseMode(mouseRelative ? SDL_TRUE : SDL_FALSE);
-      }
+void VulkanEngine::handle_input() {
+  SDL_Event e;
+  bool press = false;
 
-      if (e.type == SDL_MOUSEBUTTONDOWN) {
-        if (e.button.button == SDL_BUTTON_LEFT) {
-          mouseRelative = true;
-          SDL_SetRelativeMouseMode(mouseRelative ? SDL_TRUE : SDL_FALSE);
-        }
-      }
+  // SDL event handling
+  while (SDL_PollEvent(&e) != 0) {
+    if (e.type == SDL_QUIT) bQuit = true;
 
-      if (e.type == SDL_MOUSEWHEEL)
-        _cameraXYZPos.z <= 0.0f ? _cameraXYZPos.z += e.wheel.y* 0.1f
-                                : _cameraXYZPos.z = 0.0f;
+    if (e.type == SDL_KEYDOWN) {
+      if (e.key.keysym.sym == SDLK_ESCAPE)
+        ;
+    }
 
-      if (e.type == SDL_MOUSEMOTION && mouseRelative) {
-        _mouseRelX += e.motion.xrel;
-        _mouseRelY += e.motion.yrel;
+    if (e.type == SDL_MOUSEBUTTONDOWN) {
+      if (e.button.button == SDL_BUTTON_LEFT) {
+        mouseState.pressedLeft = e.button.state == SDL_PRESSED;
       }
     }
 
-    draw();
+    if (e.type == SDL_MOUSEBUTTONUP) {
+      if (e.button.button == SDL_BUTTON_LEFT) {
+        mouseState.pressedLeft = e.button.state == SDL_PRESSED;
+      }
+    }
+
+    if (e.type == SDL_MOUSEMOTION) {
+      _mouseX += e.motion.xrel;
+      _mouseY += e.motion.yrel;
+    }
   }
+
+  SDL_SetRelativeMouseMode(mouseState.pressedLeft ? SDL_TRUE : SDL_FALSE);
+
+  mouseState.pos.x = static_cast<float>(_mouseX / (float)_windowExtent.width);
+  mouseState.pos.y = static_cast<float>(-_mouseY / (float)_windowExtent.height);
+
+  std::cout << "Mouse pos: " << mouseState.pos.x << ", " << mouseState.pos.y
+            << std::endl;
+
+  const Uint8* currentKeyStates = SDL_GetKeyboardState(NULL);
+
+  if (currentKeyStates[SDL_SCANCODE_W]) {
+    positioner._movement._forward = true;
+  } else {
+    positioner._movement._forward = false;
+  }
+
+  if (currentKeyStates[SDL_SCANCODE_S]) {
+    positioner._movement._backward = true;
+  } else {
+    positioner._movement._backward = false;
+  }
+
+  if (currentKeyStates[SDL_SCANCODE_A]) {
+    positioner._movement._left = true;
+  } else {
+    positioner._movement._left = false;
+  }
+
+  if (currentKeyStates[SDL_SCANCODE_D]) {
+    positioner._movement._right = true;
+  } else {
+    positioner._movement._right = false;
+  }
+
+  if (currentKeyStates[SDL_SCANCODE_E]) {
+    positioner._movement._up = true;
+  } else {
+    positioner._movement._up = false;
+  }
+
+  if (currentKeyStates[SDL_SCANCODE_Q]) {
+    positioner._movement._down = true;
+  } else {
+    positioner._movement._down = false;
+  }
+
+  if (currentKeyStates[SDL_SCANCODE_LSHIFT]) {
+    positioner._movement._fastSpeed = true;
+  } else {
+    positioner._movement._fastSpeed = false;
+  }
+
+  if (currentKeyStates[SDL_SCANCODE_SPACE])
+    positioner.setUpVector(glm::vec3(0.0f, 1.0f, 0.0f));
+}
+
+void VulkanEngine::update() {
+  double deltaTime = (SDL_GetTicks() - _milisecondsPreviousFrame) / 1000.0f;
+  _milisecondsPreviousFrame = SDL_GetTicks();
+
+  positioner.update(deltaTime, mouseState.pos, mouseState.pressedLeft);
 }
 
 void VulkanEngine::init_path() {
@@ -318,6 +339,10 @@ void VulkanEngine::init_path() {
   if (!_NSGetExecutablePath(buf, &bufsize)) {
     path = buf;
     path.erase(path.rfind('/'));
+    if (path.find(".app") != std::string::npos) {
+      path.erase(path.rfind('/'));
+      path += "/Resources";
+    }
   }
 #endif
 }
@@ -387,6 +412,14 @@ void VulkanEngine::init_vulkan() {
   allocatorInfo.device = _device;
   allocatorInfo.instance = _instance;
   vmaCreateAllocator(&allocatorInfo, &_allocator);
+
+  vkGetPhysicalDeviceProperties(_chosenGPU,
+                                &_gpuProperties);  // for M1 mac 16
+#if defined(DEBUG)
+  std::cout << "The GPU has a minimum buffer alignment of "
+            << _gpuProperties.limits.minUniformBufferOffsetAlignment
+            << std::endl;
+#endif
 }
 
 void VulkanEngine::init_swapchain() {
@@ -566,8 +599,9 @@ void VulkanEngine::init_default_renderpass() {
   render_pass_info.dependencyCount = 2;
   render_pass_info.pDependencies = &dependencies[0];
 
-  VK_CHECK(                                                                  //
-      vkCreateRenderPass(_device, &render_pass_info, nullptr, &_renderPass)  //
+  VK_CHECK(  //
+      vkCreateRenderPass(_device, &render_pass_info, nullptr,
+                         &_renderPass)  //
   );
 
   _mainDeletionQueue.push_function([=]() {               //
@@ -636,6 +670,7 @@ void VulkanEngine::init_sync_structures() {
                           nullptr,                        //
                           &_frames[i]._presentSemaphore)  //
     );
+
     VK_CHECK(                                            //
         vkCreateSemaphore(_device,                       //
                           &semaphoreCreateInfo,          //
@@ -648,6 +683,99 @@ void VulkanEngine::init_sync_structures() {
       vkDestroySemaphore(_device, _frames[i]._renderSemaphore, nullptr);   //
     });
   }
+}
+
+void VulkanEngine::init_descriptors() {
+  std::vector<VkDescriptorPoolSize> sizes = {
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 10},
+  };
+
+  VkDescriptorPoolCreateInfo poolInfo = {};
+  poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  poolInfo.flags = 0;
+  poolInfo.maxSets = 10;
+  poolInfo.poolSizeCount = static_cast<uint32_t>(sizes.size());
+  poolInfo.pPoolSizes = sizes.data();
+
+  vkCreateDescriptorPool(_device, &poolInfo, nullptr, &_descriptorPool);
+
+  VkDescriptorSetLayoutBinding cameraBind =
+      vkinit::descriptorset_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                           VK_SHADER_STAGE_VERTEX_BIT, 0);
+
+  VkDescriptorSetLayoutBinding sceneBind = vkinit::descriptorset_layout_binding(
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 1);
+
+  VkDescriptorSetLayoutBinding bindings[] = {cameraBind, sceneBind};
+
+  VkDescriptorSetLayoutCreateInfo setInfo = {};
+  setInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  setInfo.pNext = nullptr;
+  setInfo.bindingCount = 2;
+  setInfo.flags = 0;
+  setInfo.pBindings = bindings;
+
+  vkCreateDescriptorSetLayout(_device, &setInfo, nullptr, &_globalSetLayout);
+
+  const size_t sceneParamBufferSize =
+      FRAME_OVERLAP * pad_uniform_buffer_size(sizeof(GPUSceneData));
+  _sceneParameterBuffer =
+      create_buffer(sceneParamBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                    VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+  for (int i = 0; i < FRAME_OVERLAP; i++) {
+    _frames[i].cameraBuffer = create_buffer(  //
+        sizeof(GPUCameraData),                //
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,   //
+        VMA_MEMORY_USAGE_CPU_TO_GPU           //
+    );
+
+    VkDescriptorSetAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.pNext = nullptr;
+    allocInfo.descriptorPool = _descriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &_globalSetLayout;
+
+    vkAllocateDescriptorSets(_device, &allocInfo, &_frames[i].globalDescriptor);
+
+    VkDescriptorBufferInfo cameraInfo = {};
+    cameraInfo.buffer = _frames[i].cameraBuffer._buffer;
+    cameraInfo.offset = 0;
+    cameraInfo.range = sizeof(GPUCameraData);
+
+    VkDescriptorBufferInfo sceneInfo = {};
+    sceneInfo.buffer = _sceneParameterBuffer._buffer;
+    sceneInfo.offset = 0;
+    sceneInfo.range = sizeof(GPUSceneData);
+
+    VkWriteDescriptorSet cameraWrite = vkinit::write_descriptor_buffer(
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, _frames[i].globalDescriptor,
+        &cameraInfo, 0);
+
+    VkWriteDescriptorSet sceneWrite = vkinit::write_descriptor_buffer(
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, _frames[i].globalDescriptor,
+        &sceneInfo, 1);
+
+    VkWriteDescriptorSet setWrites[] = {cameraWrite, sceneWrite};
+
+    vkUpdateDescriptorSets(_device, 2, setWrites, 0, nullptr);
+  }
+
+  _mainDeletionQueue.push_function([&]() {
+    vmaDestroyBuffer(_allocator, _sceneParameterBuffer._buffer,
+                     _sceneParameterBuffer._allocation);
+    vkDestroyDescriptorSetLayout(_device, _globalSetLayout, nullptr);
+
+    vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
+
+    for (int i = 0; i < FRAME_OVERLAP; i++) {
+      vmaDestroyBuffer(_allocator, _frames[i].cameraBuffer._buffer,
+                       _frames[i].cameraBuffer._allocation);
+    }
+  });
 }
 
 bool VulkanEngine::load_shader_module(const std::string filename,
@@ -708,7 +836,7 @@ void VulkanEngine::init_pipelines() {
     std::cout << "Vertex shader loaded" << std::endl;
   }
 
-  if (!load_shader_module(path + "/shaders/triangle.frag.spv",
+  if (!load_shader_module(path + "/shaders/default_lit.frag.spv",
                           &fragmentShader)) {
     std::cerr << "Failed to load fragment shader" << std::endl;
     return;
@@ -726,6 +854,9 @@ void VulkanEngine::init_pipelines() {
 
   mesh_pipeline_layout_info.pPushConstantRanges = &push_constant;
   mesh_pipeline_layout_info.pushConstantRangeCount = 1;
+
+  mesh_pipeline_layout_info.setLayoutCount = 1;
+  mesh_pipeline_layout_info.pSetLayouts = &_globalSetLayout;
 
   VkPipelineLayout mesh_pipeline_layout;
 
@@ -859,38 +990,126 @@ void VulkanEngine::load_meshes() {
 
 void VulkanEngine::init_scene() {
   RenderObject monkey;
-  monkey.mesh = get_mesh("triangle");
+  monkey.mesh = get_mesh("monkey");
   monkey.material = get_material("defaultmesh");
   monkey.transformMatrix = glm::mat4{1.0f};
 
   _renderables.push_back(monkey);
+}
 
-  for (int x = -20; x <= 20; x++) {
-    for (int y = -20; y <= 20; y++) {
-      RenderObject tri;
-      tri.mesh = get_mesh("monkey");
-      tri.material = get_material("defaultmesh");
-      glm::mat4 translation =
-          glm::translate(glm::mat4{1.0}, glm::vec3(x, 0, y));
-      glm::mat4 scale = glm::scale(glm::mat4{1.0}, glm::vec3(0.2, 0.2, 0.2));
-      tri.transformMatrix = translation * scale;
+void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first,
+                                int count) {
+  // make a model view matrix for rendering the object camera view
+  glm::mat4 view = camera.getViewMatrix();
 
-      _renderables.push_back(tri);
+  // camera projection
+  glm::mat4 projection =
+      glm::perspective(glm::radians(70.f),
+                       static_cast<float>(_windowExtent.width) /
+                           static_cast<float>(_windowExtent.height),
+                       0.1f, 200.0f);
+  projection[1][1] *= -1;
+
+  GPUCameraData camData;
+  camData.proj = projection;
+  camData.view = view;
+  camData.viewproj = projection * view;
+
+  void* data;
+  vmaMapMemory(_allocator, get_current_frame().cameraBuffer._allocation, &data);
+  memcpy(data, &camData, sizeof(GPUCameraData));
+  vmaUnmapMemory(_allocator, get_current_frame().cameraBuffer._allocation);
+
+  float framed = (_frameNumber / 60.f);
+  _sceneParameters.ambientColor = {sin(framed), 0, cos(framed), 1};
+
+  char* sceneData;
+  vmaMapMemory(_allocator, _sceneParameterBuffer._allocation,
+               (void**)&sceneData);
+  int frameIndex = _frameNumber % FRAME_OVERLAP;
+  sceneData += pad_uniform_buffer_size(sizeof(GPUSceneData)) * frameIndex;
+  memcpy(sceneData, &_sceneParameters, sizeof(GPUSceneData));
+  vmaUnmapMemory(_allocator, _sceneParameterBuffer._allocation);
+
+  Mesh* lastMesh = nullptr;
+  Material* lastMaterial = nullptr;
+  for (int i = 0; i < count; i++) {
+    RenderObject& object = first[i];
+
+    // only bind the pipeline if it doesn't match with the already bound one
+    if (object.material != lastMaterial) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                        object.material->pipeline);
+      lastMaterial = object.material;
+
+      uint32_t uniform_offset =
+          pad_uniform_buffer_size(sizeof(GPUSceneData)) * frameIndex;
+
+      vkCmdBindDescriptorSets(
+          cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, object.material->pipelineLayout,
+          0, 1, &get_current_frame().globalDescriptor, 1, &uniform_offset);
     }
+
+    MeshPushConstants constants;
+    constants.render_matrix = object.transformMatrix;
+
+    // upload the mesh to the GPU via push constants
+    vkCmdPushConstants(cmd, object.material->pipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants),
+                       &constants);
+
+    // only bind the mesh if it's a different one from last bind
+    if (object.mesh != lastMesh) {
+      // bind the mesh vertex buffer with offset 0
+      VkDeviceSize offset = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &object.mesh->_vertexBuffer._buffer,
+                             &offset);
+      lastMesh = object.mesh;
+    }
+    // we can now draw
+    vkCmdDraw(cmd, object.mesh->_vertices.size(), 1, 0, i);
   }
-
-  RenderObject myShape;
-  myShape.mesh = get_mesh("myshape");
-  myShape.material = get_material("defaultmesh");
-
-  glm::mat4 translation = glm::translate(glm::mat4{1.0}, glm::vec3(0, 5, 0));
-  glm::mat4 scale = glm::scale(glm::mat4{1.0}, glm::vec3(0.2, 0.2, 0.2));
-
-  myShape.transformMatrix = translation * scale;
-
-  _renderables.push_back(myShape);
 }
 
 FrameData& VulkanEngine::get_current_frame() {
   return _frames[_frameNumber % FRAME_OVERLAP];
+}
+
+AllocatedBuffer VulkanEngine::create_buffer(size_t allocSize,
+                                            VkBufferUsageFlags usage,
+                                            VmaMemoryUsage memoryUsage) {
+  VkBufferCreateInfo bufferInfo = {};
+  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  bufferInfo.pNext = nullptr;
+
+  bufferInfo.size = allocSize;
+  bufferInfo.usage = usage;
+
+  VmaAllocationCreateInfo vmaAllocInfo = {};
+  vmaAllocInfo.usage = memoryUsage;
+
+  AllocatedBuffer newBuffer;
+
+  VK_CHECK(                        //
+      vmaCreateBuffer(             //
+          _allocator,              //
+          &bufferInfo,             //
+          &vmaAllocInfo,           //
+          &newBuffer._buffer,      //
+          &newBuffer._allocation,  //
+          nullptr)                 //
+  );
+
+  return newBuffer;
+}
+
+// https://github.com/SaschaWillems/Vulkan/tree/master/examples/dynamicuniformbuffer
+size_t VulkanEngine::pad_uniform_buffer_size(size_t originalSize) {
+  size_t minUboAlignment =
+      _gpuProperties.limits.minUniformBufferOffsetAlignment;
+  size_t alignedSize = originalSize;
+  if (minUboAlignment > 0) {
+    alignedSize = (alignedSize + minUboAlignment - 1) & ~(minUboAlignment - 1);
+  }
+  return alignedSize;
 }

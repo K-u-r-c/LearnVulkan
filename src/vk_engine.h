@@ -5,6 +5,8 @@
 #include "vk_deletionQueue.h"
 #include "vk_mesh.h"
 
+#include "camera/camera.h"
+
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -29,12 +31,29 @@ struct RenderObject {
   glm::mat4 transformMatrix;
 };
 
+struct GPUCameraData {
+  glm::mat4 view;
+  glm::mat4 proj;
+  glm::mat4 viewproj;
+};
+
+struct GPUSceneData {
+  glm::vec4 fogColor;      // w is for exponent
+  glm::vec4 fogDistances;  // x for min, y for max, zw unused
+  glm::vec4 ambientColor;
+  glm::vec4 lightDirection;  // w for sun power
+  glm::vec4 lightColor;
+};
+
 struct FrameData {
   VkSemaphore _presentSemaphore, _renderSemaphore;
   VkFence _renderFence;
 
   VkCommandPool _commandPool;
   VkCommandBuffer _mainCommandBuffer;
+
+  AllocatedBuffer cameraBuffer;
+  VkDescriptorSet globalDescriptor;
 };
 
 class VulkanEngine {
@@ -43,21 +62,18 @@ class VulkanEngine {
   int _frameNumber{0};
 
   VkExtent2D _windowExtent{1600, 800};
-
-  glm::vec3 _cameraXYZPos = glm::vec3(0.0f);
-  int _mouseRelX = 0;
-  int _mouseRelY = 0;
-  float _mouseSensitivity = 0.1f;
+  int _milisecondsPreviousFrame{0};
 
   struct SDL_Window* _window{nullptr};
 
-  VkInstance _instance;                       // Vulkan library handle
-  VkDebugUtilsMessengerEXT _debug_messenger;  // Vulkan debug output handle
-  VkPhysicalDevice _chosenGPU;                // Vulkan physical device
-  VkDevice _device;                           // Vulkan device for commands
+  VkInstance _instance;
+  VkDebugUtilsMessengerEXT _debug_messenger;
+  VkPhysicalDevice _chosenGPU;
+  VkPhysicalDeviceProperties _gpuProperties;
+  VkDevice _device;
 
-  VkQueue _graphicsQueue;         // Queue we will submit to
-  uint32_t _graphicsQueueFamily;  // Family of that queue
+  VkQueue _graphicsQueue;
+  uint32_t _graphicsQueueFamily;
 
   FrameData _frames[FRAME_OVERLAP];
 
@@ -73,11 +89,17 @@ class VulkanEngine {
 
   DeletionQueue _mainDeletionQueue;
 
-  VmaAllocator _allocator;  // Vulkan Memory Allocator
+  VmaAllocator _allocator;
 
   VkImageView _depthImageView;
   AllocatedImage _depthImage;
   VkFormat _depthFormat;
+
+  VkDescriptorSetLayout _globalSetLayout;
+  VkDescriptorPool _descriptorPool;
+
+  GPUSceneData _sceneParameters;
+  AllocatedBuffer _sceneParameterBuffer;
 
   // initializes everything in the engine
   void init(void);
@@ -105,10 +127,19 @@ class VulkanEngine {
 
   void draw_objects(VkCommandBuffer cmd, RenderObject* first, int count);
 
-  FrameData& get_current_frame();
+  FrameData& get_current_frame(void);
+
+  AllocatedBuffer create_buffer(size_t allocSize, VkBufferUsageFlags usage,
+                                VmaMemoryUsage memoryUsage);
+
+  size_t pad_uniform_buffer_size(size_t originalSize);
 
  private:
   std::string path;
+
+  bool bQuit = false;
+
+  int _mouseX{0}, _mouseY{0};
 
   void init_path(void);
 
@@ -124,6 +155,10 @@ class VulkanEngine {
 
   void init_sync_structures(void);
 
+  void update(void);
+
+  void handle_input(void);
+
   bool load_shader_module(const std::string filePath,
                           VkShaderModule* outShaderModule);
 
@@ -134,6 +169,8 @@ class VulkanEngine {
   void upload_mesh(Mesh& mesh);
 
   void init_scene(void);
+
+  void init_descriptors(void);
 };
 
 #endif /* C12F24BE_7752_44A1_B4B1_AA3E1F0F254D */

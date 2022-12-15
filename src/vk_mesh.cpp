@@ -92,7 +92,8 @@ bool Mesh::load_from_obj(const std::string& filename) {
             attrib.normals[3 * idx.normal_index + 2],
         };
 
-        vertex.color = vertex.normal;
+        vertex.color = vertex.normal *
+                       0.1f;  // glm::vec3(1.0f, 1.0f, 1.0f);  // vertex.normal;
 
         _vertices.push_back(vertex);
       }

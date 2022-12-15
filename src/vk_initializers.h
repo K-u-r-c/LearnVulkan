@@ -59,6 +59,14 @@ VkImageViewCreateInfo image_view_create_info(VkFormat format, VkImage image,
 VkPipelineDepthStencilStateCreateInfo depth_stencil_create_info(
     bool bDepthTest, bool bDepthWrite, VkCompareOp compareOp);
 
+VkDescriptorSetLayoutBinding descriptorset_layout_binding(
+    VkDescriptorType type, VkShaderStageFlags stageFlags, uint32_t binding);
+
+VkWriteDescriptorSet write_descriptor_buffer(VkDescriptorType type,
+                                             VkDescriptorSet dstSet,
+                                             VkDescriptorBufferInfo* bufferInfo,
+                                             uint32_t binding);
+
 }  // namespace vkinit
 
 #endif /* B277EA88_4840_4CAD_AE3C_C90EDFE4016A */
