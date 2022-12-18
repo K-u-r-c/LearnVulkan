@@ -6,6 +6,7 @@
 #include "vk_mesh.h"
 
 #include "camera/camera.h"
+#include "Utility/FPSCounter.h"
 
 #include <vector>
 #include <string>
@@ -45,6 +46,10 @@ struct GPUSceneData {
   glm::vec4 lightColor;
 };
 
+struct GPUObjectData {
+  glm::mat4 modelMatrix;
+};
+
 struct FrameData {
   VkSemaphore _presentSemaphore, _renderSemaphore;
   VkFence _renderFence;
@@ -53,7 +58,10 @@ struct FrameData {
   VkCommandBuffer _mainCommandBuffer;
 
   AllocatedBuffer cameraBuffer;
+  AllocatedBuffer objectBuffer;
+
   VkDescriptorSet globalDescriptor;
+  VkDescriptorSet objectDescriptor;
 };
 
 class VulkanEngine {
@@ -96,6 +104,7 @@ class VulkanEngine {
   VkFormat _depthFormat;
 
   VkDescriptorSetLayout _globalSetLayout;
+  VkDescriptorSetLayout _objectSetLayout;
   VkDescriptorPool _descriptorPool;
 
   GPUSceneData _sceneParameters;
