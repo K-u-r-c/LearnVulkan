@@ -83,7 +83,8 @@ void VulkanEngine::init() {
   // We initialize SDL and create a window with it.
   SDL_Init(SDL_INIT_VIDEO);
 
-  SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN);
+  SDL_WindowFlags window_flags =
+      (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 
   _window = SDL_CreateWindow(   // SDL window creation
       "Vulkan Engine",          // Window title
@@ -128,7 +129,6 @@ void VulkanEngine::cleanup() {
     vkDeviceWaitIdle(_device);
 
     _mainDeletionQueue.flush();
-    vmaDestroyAllocator(_allocator);
 
     vkDestroySurfaceKHR(_instance, _surface, nullptr);
 
@@ -142,9 +142,7 @@ void VulkanEngine::cleanup() {
 
 void VulkanEngine::draw() {
   // If window is minimized skip drawing
-  if (SDL_GetWindowFlags(_window) & SDL_WINDOW_MINIMIZED) {
-    return;
-  }
+  if (SDL_GetWindowFlags(_window) & SDL_WINDOW_MINIMIZED) return;
 
   // Wait untill the GPU has finished rendering the last frame. Timeout of 1 sec
   VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence,
@@ -351,8 +349,8 @@ void VulkanEngine::init_vulkan() {
   // Creates the Vulkan instance with basic debug features
   auto inst_ret = builder.set_app_name("Vulkan Application")
                       .request_validation_layers(true)
-                      .require_api_version(1, 1, 0)
                       .use_default_debug_messenger()
+                      .require_api_version(1, 1, 0)
 #ifdef __APPLE__
                       .enable_extension("VK_MVK_macos_surface")
 #endif
@@ -384,8 +382,6 @@ void VulkanEngine::init_vulkan() {
                       .set_surface(_surface)      //
                       .select();                  //
 
-  if (!phys_ret) std::cout << phys_ret.error().message() << std::endl;
-
   // Create the final Vulkan device
   vkb::DeviceBuilder deviceBuilder{phys_ret.value()};
 
@@ -395,23 +391,24 @@ void VulkanEngine::init_vulkan() {
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES;
   shader_draw_parameters_features.pNext = nullptr;
   shader_draw_parameters_features.shaderDrawParameters = VK_TRUE;
-  vkb::Device vkbDevice =
-      deviceBuilder.add_pNext(&shader_draw_parameters_features).build().value();
+  auto dev_ret =
+      deviceBuilder.add_pNext(&shader_draw_parameters_features).build();
 
-  auto dev_ret = deviceBuilder.build();
   if (!dev_ret) {
     std::cerr << "Failed to create Vulkan device. Error: "
               << dev_ret.error().message() << std::endl;
   }
 
+  vkb::Device vkbDevice = dev_ret.value();
+
   // Get the VkDevice handle used in the rest of a Vulkan application
-  _device = dev_ret.value().device;
+  _device = vkbDevice.device;
   _chosenGPU = phys_ret.value().physical_device;
 
   // Get graphics queue using vkbootstrap
-  _graphicsQueue = dev_ret.value().get_queue(vkb::QueueType::graphics).value();
+  _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
   _graphicsQueueFamily =
-      dev_ret.value().get_queue_index(vkb::QueueType::graphics).value();
+      vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
 
   // Initialize memory allocator
   VmaAllocatorCreateInfo allocatorInfo = {};
@@ -419,6 +416,8 @@ void VulkanEngine::init_vulkan() {
   allocatorInfo.device = _device;
   allocatorInfo.instance = _instance;
   vmaCreateAllocator(&allocatorInfo, &_allocator);
+
+  _mainDeletionQueue.push_function([&]() { vmaDestroyAllocator(_allocator); });
 
   vkGetPhysicalDeviceProperties(_chosenGPU,
                                 &_gpuProperties);  // for M1 mac 16
@@ -435,7 +434,7 @@ void VulkanEngine::init_swapchain() {
   vkb::Swapchain vkbSwapchain =
       swapchainBuilder
           .use_default_format_selection()                                 //
-          .set_desired_present_mode(VK_PRESENT_MODE_MAILBOX_KHR)          //
+          .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)             //
           .set_desired_extent(_windowExtent.width, _windowExtent.height)  //
           .build()                                                        //
           .value();                                                       //
@@ -812,6 +811,7 @@ void VulkanEngine::init_descriptors() {
   _mainDeletionQueue.push_function([&]() {
     vmaDestroyBuffer(_allocator, _sceneParameterBuffer._buffer,
                      _sceneParameterBuffer._allocation);
+
     vkDestroyDescriptorSetLayout(_device, _globalSetLayout, nullptr);
 
     vkDestroyDescriptorSetLayout(_device, _objectSetLayout, nullptr);
@@ -819,11 +819,11 @@ void VulkanEngine::init_descriptors() {
     vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
 
     for (int i = 0; i < FRAME_OVERLAP; i++) {
-      vmaDestroyBuffer(_allocator, _frames[i].cameraBuffer._buffer,
-                       _frames[i].cameraBuffer._allocation);
-
       vmaDestroyBuffer(_allocator, _frames[i].objectBuffer._buffer,
                        _frames[i].objectBuffer._allocation);
+
+      vmaDestroyBuffer(_allocator, _frames[i].cameraBuffer._buffer,
+                       _frames[i].cameraBuffer._allocation);
     }
   });
 }
@@ -1087,13 +1087,11 @@ void VulkanEngine::draw_objects(VkCommandBuffer cmd, RenderObject* first,
   vmaMapMemory(_allocator, get_current_frame().objectBuffer._allocation,
                &objectData);
   GPUObjectData* objectSSBO = (GPUObjectData*)objectData;
-
   for (int i = 0; i < count; i++) {
     RenderObject& object = first[i];
 
     objectSSBO[i].modelMatrix = object.transformMatrix;
   }
-
   vmaUnmapMemory(_allocator, get_current_frame().objectBuffer._allocation);
 
   Mesh* lastMesh = nullptr;
