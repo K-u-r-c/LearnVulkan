@@ -16,6 +16,12 @@
 
 constexpr unsigned FRAME_OVERLAP = 2;
 
+struct UploadContext {
+  VkFence _uploadFence;
+  VkCommandPool _commandPool;
+  VkCommandBuffer _commandBuffer;
+};
+
 struct MeshPushConstants {
   glm::vec4 data;
   glm::mat4 render_matrix;
@@ -110,6 +116,8 @@ class VulkanEngine {
   GPUSceneData _sceneParameters;
   AllocatedBuffer _sceneParameterBuffer;
 
+  UploadContext _uploadContext;
+
   // initializes everything in the engine
   void init(void);
 
@@ -142,6 +150,8 @@ class VulkanEngine {
                                 VmaMemoryUsage memoryUsage);
 
   size_t pad_uniform_buffer_size(size_t originalSize);
+
+  void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
 
  private:
   std::string path;
