@@ -2,9 +2,12 @@
 #define B75A0784_44B4_4B00_A0C0_899C54E55663
 
 #include "vk_types.h"
+
 #include <vector>
 #include <string>
+
 #include <glm/vec3.hpp>
+#include <glm/vec2.hpp>
 
 struct VertexInputDescription {
   std::vector<VkVertexInputBindingDescription> bindings;
@@ -17,6 +20,7 @@ struct Vertex {
   glm::vec3 position;
   glm::vec3 normal;
   glm::vec3 color;
+  glm::vec2 uv;
 
   static VertexInputDescription get_vertex_description();
 };

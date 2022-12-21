@@ -20,15 +20,11 @@ VertexInputDescription Vertex::get_vertex_description() {
   positionAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
   positionAttribute.offset = offsetof(Vertex, position);
 
-  description.attributes.push_back(positionAttribute);
-
   VkVertexInputAttributeDescription normalAttribute{};
   normalAttribute.binding = 0;
   normalAttribute.location = 1;
   normalAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
   normalAttribute.offset = offsetof(Vertex, normal);
-
-  description.attributes.push_back(normalAttribute);
 
   VkVertexInputAttributeDescription colorAttribute{};
   colorAttribute.binding = 0;
@@ -36,7 +32,16 @@ VertexInputDescription Vertex::get_vertex_description() {
   colorAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
   colorAttribute.offset = offsetof(Vertex, color);
 
+  VkVertexInputAttributeDescription uvAttribute = {};
+  uvAttribute.binding = 0;
+  uvAttribute.location = 3;
+  uvAttribute.format = VK_FORMAT_R32G32_SFLOAT;
+  uvAttribute.offset = offsetof(Vertex, uv);
+
+  description.attributes.push_back(positionAttribute);
+  description.attributes.push_back(normalAttribute);
   description.attributes.push_back(colorAttribute);
+  description.attributes.push_back(uvAttribute);
 
   return description;
 }
@@ -92,8 +97,12 @@ bool Mesh::load_from_obj(const std::string& filename) {
             attrib.normals[3 * idx.normal_index + 2],
         };
 
-        vertex.color = vertex.normal *
-                       0.1f;  // glm::vec3(1.0f, 1.0f, 1.0f);  // vertex.normal;
+        vertex.uv = {
+            attrib.texcoords[2 * idx.texcoord_index + 0],
+            1 - attrib.texcoords[2 * idx.texcoord_index + 1],
+        };
+
+        vertex.color = vertex.normal;
 
         _vertices.push_back(vertex);
       }

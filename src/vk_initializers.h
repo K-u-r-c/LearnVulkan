@@ -67,6 +67,15 @@ VkWriteDescriptorSet write_descriptor_buffer(VkDescriptorType type,
                                              VkDescriptorBufferInfo* bufferInfo,
                                              uint32_t binding);
 
+VkWriteDescriptorSet write_descriptor_image(VkDescriptorType type,
+                                            VkDescriptorSet dstSet,
+                                            VkDescriptorImageInfo* imageInfo,
+                                            uint32_t binding);
+
+VkSamplerCreateInfo sampler_create_info(
+    VkFilter filters,
+    VkSamplerAddressMode samplerAdressMode = VK_SAMPLER_ADDRESS_MODE_REPEAT);
+
 }  // namespace vkinit
 
 #endif /* B277EA88_4840_4CAD_AE3C_C90EDFE4016A */

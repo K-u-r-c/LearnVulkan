@@ -28,6 +28,7 @@ struct MeshPushConstants {
 };
 
 struct Material {
+  VkDescriptorSet textureSet{VK_NULL_HANDLE};
   VkPipeline pipeline;
   VkPipelineLayout pipelineLayout;
 };
@@ -68,6 +69,11 @@ struct FrameData {
 
   VkDescriptorSet globalDescriptor;
   VkDescriptorSet objectDescriptor;
+};
+
+struct Texture {
+  AllocatedImage image;
+  VkImageView imageView;
 };
 
 class VulkanEngine {
@@ -111,6 +117,7 @@ class VulkanEngine {
 
   VkDescriptorSetLayout _globalSetLayout;
   VkDescriptorSetLayout _objectSetLayout;
+  VkDescriptorSetLayout _singleTextureSetLayout;
   VkDescriptorPool _descriptorPool;
 
   GPUSceneData _sceneParameters;
@@ -134,6 +141,7 @@ class VulkanEngine {
 
   std::unordered_map<std::string, Material> _materials;
   std::unordered_map<std::string, Mesh> _meshes;
+  std::unordered_map<std::string, Texture> _loadedTextures;
 
   Material* create_material(VkPipeline pipeline, VkPipelineLayout layout,
                             const std::string& name);
@@ -152,6 +160,8 @@ class VulkanEngine {
   size_t pad_uniform_buffer_size(size_t originalSize);
 
   void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
+
+  void load_images();
 
  private:
   std::string path;
